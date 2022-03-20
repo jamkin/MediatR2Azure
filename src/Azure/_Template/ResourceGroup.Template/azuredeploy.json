@@ -1,0 +1,241 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "sbApiVersion": {
+      "type": "string"
+    },
+    "sbNamespace": {
+      "type": "string"
+    },
+    "queueNameSuffix": {
+      "type": "string",
+      "defaultValue": "queue"
+    },
+    "topicNameSuffix": {
+      "type": "string",
+      "defaultValue": "topic"
+    },
+    "subscriptionNameSuffix": {
+      "type": "string",
+      "defaultValue": "subscription"
+    },
+    "storageAccountName": {
+      "type": "string"
+    },
+    "appInsightsName": {
+      "type": "string"
+    },
+    "functionAppName": {
+      "type": "string"
+    }
+  },
+  /*
+    The message handler setup is
+      foo-service-1: foo-request-1
+      foo-service-2: foo-request-2,
+      bar-service-1: bar-request-1, bar-request-2, foo-notification-1, foo-notification-2
+      baz-service-1: baz-request-1, foo-notification-1, foo-notification-2, foo-notification-3, bar-notification-1, bar-notification-2
+  */
+  "variables": {
+    "requests": {
+      "type": "array",
+      "value": [
+        "foo-request-1", // requests[0]
+        "foo-request-2", // requests[1]
+        "bar-request-1", // requests[2]
+        "bar-request-2", // requests[3]
+        "baz-request-1" // requests[4]
+      ]
+    },
+    "notifications": {
+      "type": "array",
+      "value": [
+        "foo-notification-1", // notifications[0]
+        "foo-notification-2", // notifications[1]
+        "foo-notification-3", // notifications[2]
+        "bar-notification-1", // notifications[3]
+        "bar-notification-2", // notifications[4]
+        "baz-notification-1" // notifications[5]
+      ]
+    },
+    "services": {
+      "type": "array",
+      "value": [
+        "foo-service-1", // services[0]
+        "foo-service-2", // services[1]
+        "bar-service-1", // services[2]
+        "baz-service-1" // services[3]
+      ]
+    },
+    "requestHandlers": {
+      "type": "array",
+      "value": [
+        {
+          // foo-request-1 => foo-service-1
+          "request": "[variables('requests')[0]]",
+          "service": "[variables('services')[0]]"
+        },
+        {
+          // foo-request-2 => foo-service-2
+          "request": "[variables('requests')[1]]",
+          "service": "[variables('services')[1]]"
+        },
+        {
+          // bar-request-1 => bar-service-1
+          "request": "[variables('requests')[2]]",
+          "service": "[variables('services')[2]]"
+        },
+        {
+          // bar-request-2 => bar-service-2
+          "request": "[variables('requests')[3]]",
+          "service": "[variables('services')[2]]"
+        },
+        {
+          // baz-request-1 => baz-service-1
+          "request": "[variables('requests')[4]]",
+          "service": "[variables('services')[3]]"
+        }
+      ]
+    },
+    "notificationHandlers": {
+      "type": "array",
+      "value": [
+        {
+          // foo-notification-1 => bar-service-1
+          "service": "[variables('services')[2]]",
+          "notification": "[variables('notifications')[0]]"
+        },
+        {
+          // foo-notification-2 => bar-service-1
+          "service": "[variables('services')[2]]",
+          "notification": "[variables('notifications')[1]]"
+        },
+        {
+          // foo-notification-1 => baz-service-1
+          "service": "[variables('services')[3]]",
+          "notification": "[variables('notifications')[0]]"
+        },
+        {
+          // foo-notification-2 => baz-service-1
+          "service": "[variables('services')[3]]",
+          "notification": "[variables('notifications')[1]]"
+        },
+        {
+          // foo-notification-3 => baz-service-1
+          "service": "[variables('services')[3]]",
+          "notification": "[variables('notifications')[2]]"
+        },
+        {
+          // bar-notification-1 => baz-service-1
+          "service": "[variables('services')[3]]",
+          "notification": "[variables('notifications')[3]]"
+        },
+        {
+          // bar-notification-2 => baz-service-1
+          "service": "[variables('services')[3]]",
+          "notification": "[variables('notifications')[4]]"
+        }
+      ]
+    }
+  },
+  "resources": [
+    // Service Bus
+    {
+      "apiVersion": "[parameters('sbApiVersion')]",
+      "name": "[parameters('sbNamespace')]",
+      "type": "Microsoft.ServiceBus/namespaces",
+      "location": "[resourceGroup().location]",
+      "kind": "Messaging",
+      "sku": {
+        "name": "Standard"
+      },
+      "resources": [
+        // Queues
+        {
+          "type": "Microsoft.ServiceBus/namespaces/queues",
+          "apiVersion": "[parameters('sbApiVersion')]",
+          "copy": {
+            "name": "queueNamesCopy",
+            "count": "[length(variables('requests'))]"
+          },
+          "name": "[format('{0}/{1}-{2}', parameters('sbNamespace'), concat(variables('requests')[copyIndex()]), parameters('queueNameSuffix'))]",
+          "properties": {
+            // Could add params for lock duration and so on
+          },
+          "dependsOn": [
+            "[resourceId('Microsoft.ServiceBus/namespaces', parameters('sbNamespace'))]"
+          ]
+        },
+        // Topics
+        {
+          "type": "Microsoft.ServiceBus/namespaces/topics",
+          "apiVersion": "[parameters('sbApiVersion')]",
+          "copy": {
+            "name": "topicNamesCopy",
+            "count": "[length(variables('notifications'))]"
+          },
+          "name": "[format('{0}-{1}', variables('notifications')[copyIndex()], parameters('topicNameSuffix'))]",
+          "dependsOn": [
+            "[resourceId('Microsoft.ServiceBus/namespaces', parameters('sbNamespace'))]"
+          ],
+          "properties": {}
+        },
+        // Subscriptions
+        {
+          "type": "Microsoft.ServiceBus/namespaces/topics/subscriptions",
+          "apiVersion": "[parameters('sbApiVersion')]",
+          "copy": {
+            "name": "subscriptionNamesCopy",
+            "count": "[length(variables('notificationHandlers'))]"
+          },
+          "name": "[format('{0}-{1}-{2}', variables('notificationHandlers')[copyIndex()].notification, variables('notificationHandlers')[copyIndex()].service, parameters('subscriptionNameSuffix'))]",
+          "dependsOn": [
+            "[resourceId('Microsoft.ServiceBus/namespaces/topics', format('{1}-{2}', variables('notificationHandlers')[copyIndex()].notification, parameters('topicNameSuffix')))]"
+          ],
+          "properties": {}
+        }
+      ]
+    },
+    // Storage Account
+    {
+      "type": "Microsoft.Storage/storageAccounts",
+      "name": "[parameters('storageAccountName')]",
+      "apiVersion": "2019-06-01",
+      "location": "[resourceGroup().location]",
+      "kind": "StorageV2",
+      "sku": {
+        "name": "Standard_LRS"
+      }
+    },
+    // Application Insights
+    {
+      "apiVersion": "2015-05-01",
+      "name": "[parameters('appInsightsName')]",
+      "type": "Microsoft.Insights/components",
+      "kind": "web",
+      "location": "[resourceGroup().location]",
+      "tags": {
+        "[concat('hidden-link:', resourceGroup().id, '/providers/Microsoft.Web/sites/', parameters('functionAppName'))]": "Resource"
+      },
+      "properties": {
+        "Application_Type": "web",
+        "ApplicationId": "[parameters('appInsightsName')]"
+      }
+    },
+    // Function App
+    {
+      "apiVersion": "2015-08-01",
+      "type": "Microsoft.Web/sites",
+      "name": "[parameters('functionAppName')]",
+      "location": "[resourceGroup().location]",
+      "kind": "functionapp",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]",
+        "[resourceId('Microsoft.Insights/components', parameters('appInsightsName'))]"
+      ],
+      "properties": {}
+    }
+  ],
+  "outputs": {}
+}

@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\..\Domain\MyECommerceSite.Domain.Shipping\MyECommerceSite.Domain.Shipping.csproj" />
+    <ProjectReference Include="..\..\..\DTO\MyECommerceSite.Application.Shipping.DTO\MyECommerceSite.Application.Shipping.DTO.csproj" />
+  </ItemGroup>
+
+</Project>
